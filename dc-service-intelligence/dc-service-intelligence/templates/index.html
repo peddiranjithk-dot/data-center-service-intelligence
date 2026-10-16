@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Center Service Intelligence</title>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --text:#1c2733; --muted:#6b7a89; --line:#e3e8ee;
+          --ok:#1a9d5a; --warn:#d98e04; --bad:#d93a3a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12171d; --card:#1b232c; --text:#e6edf3; --muted:#8b9bab; --line:#2b3642; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--text); padding:16px; }
+  h1 { font-size:20px; margin:0 0 16px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px; }
+  .kpi b { display:block; font-size:26px; }
+  .kpi span { color:var(--muted); font-size:12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:12px; }
+  .wide { grid-column:1/-1; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  .scroll { overflow-x:auto; }
+  .pill { padding:2px 8px; border-radius:10px; color:#fff; font-size:12px; }
+  .healthy,.P3 { background:var(--ok); } .degraded,.P2 { background:var(--warn); } .critical,.P1 { background:var(--bad); }
+  .bar { height:8px; background:var(--line); border-radius:4px; min-width:80px; }
+  .bar i { display:block; height:100%; border-radius:4px; background:var(--ok); }
+</style>
+</head>
+<body>
+<h1>Data Center Service Intelligence</h1>
+<div class="kpis" id="kpis"></div>
+<div class="grid">
+  <div class="card wide"><h2>Service health</h2><div class="scroll"><table id="services"></table></div></div>
+  <div class="card"><h2>Anomalies (latest readings)</h2><div class="scroll"><table id="anomalies"></table></div></div>
+  <div class="card"><h2>Rack power (avg W)</h2><div class="scroll"><table id="racks"></table></div></div>
+  <div class="card wide"><h2>Recent incidents</h2><div class="scroll"><table id="incidents"></table></div></div>
+</div>
+<script>
+const get = u => fetch(u).then(r => r.json());
+const table = (id, cols, rows, empty="Nothing to show") => {
+  const el = document.getElementById(id);
+  el.innerHTML = "<tr>" + cols.map(c => `<th>${c[0]}</th>`).join("") + "</tr>" +
+    (rows.length ? rows.map(r => "<tr>" + cols.map(c => `<td>${c[1](r) ?? "-"}</td>`).join("") + "</tr>").join("")
+                 : `<tr><td colspan="${cols.length}">${empty}</td></tr>`);
+};
+const pill = v => `<span class="pill ${v}">${v}</span>`;
+const fmt = t => t ? t.replace("T"," ").slice(0,16) : "open";
+
+async function load() {
+  const [s, svc, an, rk, inc] = await Promise.all(
+    ["summary","services","anomalies","racks","incidents"].map(n => get("/api/" + n)));
+  document.getElementById("kpis").innerHTML = [
+    ["Services", s.services], ["Avg health", s.avg_health], ["Critical", s.critical],
+    ["Anomalies", s.open_anomalies], ["Incidents (30d)", s.total_incidents_30d]
+  ].map(([l,v]) => `<div class="card kpi"><b>${v}</b><span>${l}</span></div>`).join("");
+
+  table("services", [
+    ["Service", r => r.service], ["Tier", r => r.tier], ["Owner", r => r.owner], ["Servers", r => r.servers],
+    ["CPU %", r => r.avg_cpu], ["Temp °C", r => r.avg_temp_c], ["Incidents", r => r.incidents_30d],
+    ["MTTR (min)", r => r.mttr_min],
+    ["Health", r => `<div class="bar"><i style="width:${r.health_score}%"></i></div> ${r.health_score}`],
+    ["Status", r => pill(r.status)]], svc);
+  table("anomalies", [["Host", r => r.hostname], ["Rack", r => r.rack], ["Service", r => r.service],
+    ["Metric", r => r.metric], ["Value", r => r.value], ["Z", r => r.z_score]], an, "No anomalies detected");
+  table("racks", [["Rack", r => r.rack], ["Servers", r => r.servers], ["Avg power (W)", r => r.avg_power_w]], rk);
+  table("incidents", [["ID", r => r.id], ["Service", r => r.service], ["Severity", r => pill(r.severity)],
+    ["Summary", r => r.summary], ["Opened", r => fmt(r.opened)], ["Resolved", r => fmt(r.resolved)]], inc);
+}
+load(); setInterval(load, 30000);
+</script>
+</body>
+</html>
